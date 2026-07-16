@@ -174,4 +174,25 @@ describe("PolymarketClient", () => {
     expect(match?.gameStartTime).toBe("2026-06-25T20:00:00Z");
     expect(match?.markets[0]?.gameStartTime).toBe("2026-06-25T20:00:00Z");
   });
+
+  it("discovers event slugs from an extensible sport scope", async () => {
+    const fetchMock = vi
+      .fn()
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 7, slug: "nba" }) })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [{ slug: "nba-tag-event" }] })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [{ events: [{ slug: "nba-series-event" }] }] })
+      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [{ slug: "nba-id-event" }] });
+    const client = new PolymarketClient({
+      gammaEndpoint: "https://example.test",
+      fetchImpl: fetchMock,
+      retryDelayMs: 0,
+      maxRetries: 0
+    });
+
+    await expect(client.fetchEventSlugsForScope("nba/games")).resolves.toEqual([
+      "nba-id-event",
+      "nba-series-event",
+      "nba-tag-event"
+    ]);
+  });
 });

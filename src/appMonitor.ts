@@ -1,5 +1,5 @@
 import type { AppConfig } from "./config.js";
-import { isMatchInMonitorWindow } from "./holder.js";
+import { isMatchEventInMonitorWindow } from "./holder.js";
 import { refreshHolderSchedule, scanHolderSchedule, type Alert, type MonitorDependencies } from "./monitor.js";
 import { PolymarketClient } from "./polymarket.js";
 import { buildSportsCatalog, type SportsCatalog } from "./sports.js";
@@ -14,7 +14,7 @@ export async function scanCombinedOnce(
   const client = dependencies.client ?? new PolymarketClient();
   const watchlist = await loadWatchlist(config.watchlistFile);
   const catalog = await refreshCatalog(config, client, watchlist);
-  const schedule = await refreshHolderSchedule(client);
+  const schedule = await refreshHolderSchedule(client, config.holderEventScopePaths);
   const alerts: Alert[] = [];
 
   alerts.push(...(await scanLargeTradesOnce(config, { ...dependencies, client }, catalog, watchlist, now)));
@@ -28,7 +28,7 @@ export async function runCombinedMonitor(config: AppConfig, dependencies: Monito
   const client = dependencies.client ?? new PolymarketClient();
   let watchlist = await loadWatchlist(config.watchlistFile);
   let catalog = await refreshCatalog(config, client, watchlist);
-  let holderSchedule = (await safeRefreshHolderSchedule(client)) ?? [];
+  let holderSchedule = (await safeRefreshHolderSchedule(client, config.holderEventScopePaths)) ?? [];
   let lastCatalogRefreshMs = Date.now();
   let lastWatchlistRefreshMs = Date.now();
   let nextLargeTradeMs = 0;
@@ -69,7 +69,7 @@ export async function runCombinedMonitor(config: AppConfig, dependencies: Monito
       localTimeKey(now) >= config.scheduleRefreshTimeLocal &&
       nowMs >= nextHolderScheduleRetryMs
     ) {
-      const refreshedSchedule = await safeRefreshHolderSchedule(client);
+      const refreshedSchedule = await safeRefreshHolderSchedule(client, config.holderEventScopePaths);
       if (refreshedSchedule) {
         holderSchedule = refreshedSchedule;
         lastHolderScheduleDay = localDay;
@@ -149,7 +149,7 @@ async function runHolderScan(
   try {
     const alerts = await scanHolderSchedule(config, { ...dependencies, client }, schedule, now);
     const activeMatches = schedule.filter((match) =>
-      isMatchInMonitorWindow(match.gameStartTime, now, config.prematchMonitorMinutes, config.matchMonitorDurationMinutes)
+      isMatchEventInMonitorWindow(match, now, config.prematchMonitorMinutes, config.matchMonitorDurationMinutes, config.holderSportWindows)
     ).length;
     console.log(`[${new Date().toISOString()}] holder scan complete, activeMatches=${activeMatches}, alerts=${alerts.length}`);
   } catch (error) {
@@ -157,9 +157,9 @@ async function runHolderScan(
   }
 }
 
-async function safeRefreshHolderSchedule(client: PolymarketClient): Promise<Awaited<ReturnType<typeof refreshHolderSchedule>> | null> {
+async function safeRefreshHolderSchedule(client: PolymarketClient, scopePaths: string[]): Promise<Awaited<ReturnType<typeof refreshHolderSchedule>> | null> {
   try {
-    return await refreshHolderSchedule(client);
+    return await refreshHolderSchedule(client, scopePaths);
   } catch (error) {
     console.error(`[${new Date().toISOString()}] holder schedule refresh failed`, error);
     return null;
@@ -167,7 +167,7 @@ async function safeRefreshHolderSchedule(client: PolymarketClient): Promise<Awai
 }
 
 function logStartupSummary(config: AppConfig, watchlist: Watchlist, catalog: SportsCatalog, schedule: Awaited<ReturnType<typeof refreshHolderSchedule>>): void {
-  console.log(`[${new Date().toISOString()}] combined monitor started, largeThresholdUsdc=${config.thresholdUsdc}, largePollSeconds=${config.pollIntervalMs / 1000}, addressEnabled=${config.addressMonitorEnabled}, addressPollSeconds=${config.addressPollIntervalMs / 1000}, addressAggregationMinutes=${config.addressAggregationWindowMs / 60_000}, catalogScopes=${catalog.scopes.length}, catalogConditions=${catalog.conditionIds.size}, configuredLargeScopes=${watchlist.largeTradeScopes.join(",") || "none"}, holderMatches=${schedule.length}`);
+  console.log(`[${new Date().toISOString()}] combined monitor started, largeThresholdUsdc=${config.thresholdUsdc}, largePollSeconds=${config.pollIntervalMs / 1000}, addressEnabled=${config.addressMonitorEnabled}, addressPollSeconds=${config.addressPollIntervalMs / 1000}, addressAggregationMinutes=${config.addressAggregationWindowMs / 60_000}, catalogScopes=${catalog.scopes.length}, catalogConditions=${catalog.conditionIds.size}, configuredLargeScopes=${watchlist.largeTradeScopes.join(",") || "none"}, holderScopes=${config.holderEventScopePaths.join(",") || "none"}, holderMatches=${schedule.length}`);
 }
 
 function logHolderSummary(schedule: Awaited<ReturnType<typeof refreshHolderSchedule>>): void {

@@ -74,21 +74,11 @@ async function sendStartupNotifications(config: AppConfig, notifier: Notifier): 
     addressAggregationWindowMs: config.addressAggregationWindowMs,
     sportsCatalogRefreshMs: config.sportsCatalogRefreshMs,
     worldCupEventSlugs: config.worldCupEventSlugs,
-    worldCupEventPrefixes: config.worldCupEventPrefixes
+    worldCupEventPrefixes: config.worldCupEventPrefixes,
+    holderEventScopePaths: config.holderEventScopePaths,
+    holderSportWindows: config.holderSportWindows
   });
 
-  if (config.addressMonitorEnabled) {
-    await notifier.sendStartup?.({
-      channel: "address-trade",
-      thresholdUsdc: config.thresholdUsdc,
-      pollIntervalMs: config.pollIntervalMs,
-      addressPollIntervalMs: config.addressPollIntervalMs,
-      addressAggregationWindowMs: config.addressAggregationWindowMs,
-      sportsCatalogRefreshMs: config.sportsCatalogRefreshMs,
-      worldCupEventSlugs: config.worldCupEventSlugs,
-      worldCupEventPrefixes: config.worldCupEventPrefixes
-    });
-  }
 }
 
 main().catch((error) => {

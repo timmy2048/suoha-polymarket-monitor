@@ -1,4 +1,5 @@
 import type { HolderAlertState } from "./state.js";
+import type { HolderSportWindow } from "./config.js";
 
 export type TargetMarketType = "moneyline" | "spread" | "total";
 
@@ -6,6 +7,7 @@ export interface MatchEvent {
   slug: string;
   title: string;
   gameStartTime: string;
+  sport?: string;
   markets: HolderMarket[];
 }
 
@@ -77,6 +79,40 @@ export function isMatchInMonitorWindow(
 
   const nowMs = now.getTime();
   return nowMs >= startMs - prematchMinutes * 60_000 && nowMs <= startMs + durationMinutes * 60_000;
+}
+
+export function isMatchEventInMonitorWindow(
+  match: Pick<MatchEvent, "gameStartTime" | "sport">,
+  now: Date,
+  defaultPrematchMinutes: number,
+  defaultPostMatchMinutes: number,
+  sportWindows: Record<string, HolderSportWindow>
+): boolean {
+  const window = getHolderSportWindow(match.sport, defaultPrematchMinutes, defaultPostMatchMinutes, sportWindows);
+  return isMatchInMonitorWindow(match.gameStartTime, now, window.prematchMinutes, window.postMatchMinutes);
+}
+
+export function getHolderSportWindow(
+  sport: string | undefined,
+  defaultPrematchMinutes: number,
+  defaultPostMatchMinutes: number,
+  sportWindows: Record<string, HolderSportWindow>
+): HolderSportWindow {
+  const normalizedSport = normalizeSport(sport);
+  return sportWindows[normalizedSport] ?? {
+    prematchMinutes: defaultPrematchMinutes,
+    postMatchMinutes: defaultPostMatchMinutes
+  };
+}
+
+export function normalizeSport(sport: string | undefined): string {
+  const normalized = (sport ?? "").trim().toLowerCase();
+  if (["fifwc", "soccer", "football"].includes(normalized)) return "soccer";
+  if (["nba", "basketball"].includes(normalized)) return "basketball";
+  if (["atp", "wta", "tennis"].includes(normalized)) return "tennis";
+  if (["mlb", "baseball"].includes(normalized)) return "baseball";
+  if (["nhl", "hockey"].includes(normalized)) return "hockey";
+  return normalized;
 }
 
 export function classifyTargetMarket(market: { slug?: string; question?: string; groupItemTitle?: string }): TargetMarketType | null {

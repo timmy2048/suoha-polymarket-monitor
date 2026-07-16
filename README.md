@@ -1,10 +1,9 @@
 # Suoha Polymarket Sports Monitor
 
-这是一个只读的 Polymarket 体育监控服务，包含三个通道：
+这是一个只读的 Polymarket 体育监控服务，包含两套推送边界：
 
-- Top Holder 持仓成本监控：当前用于世界杯比赛盘口。
-- 可配置体育市场的大额成交监控：支持单笔成交和 5 分钟拆单累计，BUY/SELL 都监控。
-- Sports 板块地址监控：清单中的地址每笔已成交 BUY/SELL 都监控，首笔立即推送，后续 5 分钟聚合推送。
+- 跟单机器人：接收大额成交和 Top Holder 持仓提醒，当前范围都是世界杯，可通过配置扩展其他体育赛事。
+- 地址机器人：只接收地址清单中钱包的已成交 BUY/SELL 动作。
 
 服务不使用私钥、不下单，只访问 Polymarket 公共 API。
 
@@ -56,8 +55,9 @@ ADDRESS_MONITOR_ENABLED=true
 
 ### Top Holder
 
-- 只监控世界杯比赛事件，不监控冠军或长期市场。
-- 开赛前 `PREMATCH_MONITOR_MINUTES` 分钟进入，开赛后 `MATCH_MONITOR_DURATION_MINUTES` 分钟停止。
+- 默认通过 `HOLDER_EVENT_SCOPE_PATHS=world-cup` 监控世界杯比赛事件，不监控冠军或长期市场；后续可以配置 `nba/games`、`atp/games` 等赛事范围。
+- 监控窗口按赛事类型计算：`HOLDER_SPORT_WINDOWS` 的格式为 `sport:开赛前分钟:开赛后分钟`。默认足球 `30/105`、篮球 `30/180`、网球 `30/240`，不会把足球的 105 分钟硬套到其他运动。
+- 未配置某个 sport 时，回退到 `PREMATCH_MONITOR_MINUTES` 和 `MATCH_MONITOR_DURATION_MINUTES`。
 - 目标为胜平负、让分 1.5/2.5、全场大小球 1.5 至 7.5 的 YES/NO，Top1。
 - 成本按 `当前份额 * 平均买入价` 计算，达到 `THRESHOLD_USDC` 才提醒。
 - 同一钱包和 Outcome 后续成本增加 `HOLDER_CHANGE_ALERT_USDC` 才再次提醒。
@@ -88,7 +88,7 @@ DINGTALK_ADDRESS_KEYWORD=sport
 
 加签机器人填写对应 `*_SECRET`。Webhook 和 Secret 只写本地 `.env` 或 VPS 上的 `.env`，不要提交 GitHub。
 
-启动后会向已配置的通道发送启动通知，包含阈值、轮询间隔、目录刷新间隔和 Holder 窗口。
+启动后跟单机器人会收到启动通知，包含阈值、轮询间隔、目录刷新间隔和 Holder 窗口；地址机器人不发送启动通知，只发送目标地址成交动作。
 
 ## 运行和验证
 

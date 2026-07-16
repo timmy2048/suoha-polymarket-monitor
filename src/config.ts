@@ -18,6 +18,8 @@ const envSchema = z.object({
   SCHEDULE_REFRESH_MODE: z.enum(["daily"]).default("daily"),
   SCHEDULE_REFRESH_TIME_LOCAL: z.string().default("00:05"),
   HOLDER_RANK_LIMIT: z.coerce.number().int().positive().default(1),
+  HOLDER_EVENT_SCOPE_PATHS: z.string().default("world-cup"),
+  HOLDER_SPORT_WINDOWS: z.string().default("soccer:30:105,basketball:30:180,tennis:30:240,baseball:30:240,hockey:30:150,football:30:210"),
   LARGE_TRADE_THRESHOLD_USDC: z.coerce.number().positive().optional(),
   LARGE_TRADE_MIN_CANDIDATE_USDC: z.coerce.number().positive().optional(),
   LARGE_TRADE_CUMULATIVE_WINDOW_SECONDS: z.coerce.number().int().positive().optional(),
@@ -56,6 +58,8 @@ export interface AppConfig {
   scheduleRefreshMode: "daily";
   scheduleRefreshTimeLocal: string;
   holderRankLimit: number;
+  holderEventScopePaths: string[];
+  holderSportWindows: Record<string, HolderSportWindow>;
   minTradeUsdc: number;
   tradeFetchLimit: number;
   cumulativeWindowSeconds: number;
@@ -100,6 +104,8 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     scheduleRefreshMode: parsed.SCHEDULE_REFRESH_MODE,
     scheduleRefreshTimeLocal: parsed.SCHEDULE_REFRESH_TIME_LOCAL,
     holderRankLimit: parsed.HOLDER_RANK_LIMIT,
+    holderEventScopePaths: splitCsv(parsed.HOLDER_EVENT_SCOPE_PATHS),
+    holderSportWindows: parseHolderSportWindows(parsed.HOLDER_SPORT_WINDOWS),
     minTradeUsdc,
     tradeFetchLimit: parsed.TRADE_FETCH_LIMIT,
     cumulativeWindowSeconds,
@@ -133,4 +139,26 @@ function splitCsv(value: string): string[] {
     .split(",")
     .map((item) => item.trim().toLowerCase())
     .filter(Boolean);
+}
+
+export interface HolderSportWindow {
+  prematchMinutes: number;
+  postMatchMinutes: number;
+}
+
+function parseHolderSportWindows(value: string): Record<string, HolderSportWindow> {
+  const windows: Record<string, HolderSportWindow> = {};
+  for (const entry of value.split(",").map((item) => item.trim()).filter(Boolean)) {
+    const [sport, prematch, postMatch] = entry.split(":").map((item) => item.trim().toLowerCase());
+    const prematchMinutes = Number(prematch);
+    const postMatchMinutes = Number(postMatch);
+    if (!sport || !Number.isInteger(prematchMinutes) || prematchMinutes < 0 || !Number.isInteger(postMatchMinutes) || postMatchMinutes <= 0) {
+      throw new Error(`Invalid HOLDER_SPORT_WINDOWS entry: ${entry}`);
+    }
+    windows[sport] = { prematchMinutes, postMatchMinutes };
+  }
+  if (Object.keys(windows).length === 0) {
+    throw new Error("HOLDER_SPORT_WINDOWS must contain at least one sport window");
+  }
+  return windows;
 }

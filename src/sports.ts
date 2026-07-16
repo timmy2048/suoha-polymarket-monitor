@@ -10,6 +10,11 @@ export interface SportsEventRecord {
   id?: string | number;
   slug?: string;
   title?: string;
+  sport?: string | { sport?: string };
+  startTime?: string;
+  eventStartTime?: string;
+  gameStartTime?: string;
+  endDate?: string;
   markets?: SportsMarketRecord[];
 }
 

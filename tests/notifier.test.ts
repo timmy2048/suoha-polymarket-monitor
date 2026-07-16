@@ -4,7 +4,8 @@ import {
   buildDingTalkWebhookUrl,
   DingTalkNotifier,
   formatDingTalkMarkdown,
-  formatStartupMarkdown
+  formatStartupMarkdown,
+  RoutedNotifier
 } from "../src/notifier.js";
 import type { Alert } from "../src/monitor.js";
 
@@ -74,6 +75,22 @@ describe("DingTalk notifier", () => {
     expect(message.title).toBe("[BUY][首仓] sport Polymarket Sports 地址成交");
     expect(message.text).toContain("**BUY | 首仓**");
     expect(message.text).toContain("tracked-wallet (0xwallet)");
+  });
+
+  it("routes Top Holder with large-trade alerts and address actions separately", async () => {
+    const largeAlerts: Alert[] = [];
+    const addressAlerts: Alert[] = [];
+    const routed = new RoutedNotifier(
+      { send: async (alert) => void largeAlerts.push(alert) },
+      { send: async (alert) => void addressAlerts.push(alert) }
+    );
+    const holderAlert: Alert = { ...largeAlert, kind: "holder", channel: undefined };
+
+    await routed.send(holderAlert);
+    await routed.send(addressAlert);
+
+    expect(largeAlerts).toEqual([holderAlert]);
+    expect(addressAlerts).toEqual([addressAlert]);
   });
 
   it("adds DingTalk signature parameters when a secret is configured", () => {

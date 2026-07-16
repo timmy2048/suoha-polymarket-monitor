@@ -156,6 +156,12 @@ function config(): AppConfig {
     scheduleRefreshMode: "daily",
     scheduleRefreshTimeLocal: "00:05",
     holderRankLimit: 1,
+    holderEventScopePaths: ["world-cup"],
+    holderSportWindows: {
+      soccer: { prematchMinutes: 30, postMatchMinutes: 105 },
+      basketball: { prematchMinutes: 30, postMatchMinutes: 180 },
+      tennis: { prematchMinutes: 30, postMatchMinutes: 240 }
+    },
     minTradeUsdc: 50_000,
     tradeFetchLimit: 500,
     cumulativeWindowSeconds: 300,

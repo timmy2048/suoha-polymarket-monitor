@@ -3,8 +3,11 @@ import {
   buildHolderAlertKey,
   classifyTargetMarket,
   createHolderCostAlert,
+  getHolderSportWindow,
   holderCostUsdc,
+  isMatchEventInMonitorWindow,
   isMatchInMonitorWindow,
+  normalizeSport,
   isTargetHolderMarket,
   shouldAlertHolderCost,
   type HolderMarket,
@@ -20,6 +23,23 @@ describe("holder monitor rules", () => {
     expect(isMatchInMonitorWindow(kickoff, new Date("2026-06-25T11:30:00Z"), 30, 105)).toBe(true);
     expect(isMatchInMonitorWindow(kickoff, new Date("2026-06-25T13:45:00Z"), 30, 105)).toBe(true);
     expect(isMatchInMonitorWindow(kickoff, new Date("2026-06-25T13:45:01Z"), 30, 105)).toBe(false);
+  });
+
+  it("uses the configured window for each sport instead of the soccer duration", () => {
+    const windows = {
+      soccer: { prematchMinutes: 30, postMatchMinutes: 105 },
+      basketball: { prematchMinutes: 30, postMatchMinutes: 180 },
+      tennis: { prematchMinutes: 15, postMatchMinutes: 240 }
+    };
+    const basketball = { gameStartTime: "2026-06-25T12:00:00Z", sport: "nba" };
+    const tennis = { gameStartTime: "2026-06-25T12:00:00Z", sport: "atp" };
+
+    expect(normalizeSport("fifwc")).toBe("soccer");
+    expect(normalizeSport("nba")).toBe("basketball");
+    expect(getHolderSportWindow("atp", 30, 105, windows)).toEqual({ prematchMinutes: 15, postMatchMinutes: 240 });
+    expect(isMatchEventInMonitorWindow(basketball, new Date("2026-06-25T14:59:59Z"), 30, 105, windows)).toBe(true);
+    expect(isMatchEventInMonitorWindow(basketball, new Date("2026-06-25T15:00:01Z"), 30, 105, windows)).toBe(false);
+    expect(isMatchEventInMonitorWindow(tennis, new Date("2026-06-25T11:45:00Z"), 30, 105, windows)).toBe(true);
   });
 
   it("classifies moneyline, spread, full totals, and team totals while rejecting futures", () => {

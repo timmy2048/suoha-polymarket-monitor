@@ -1,7 +1,8 @@
 import { buildTradeKey, isEventDateCurrentOrFuture, isWorldCupTrade, meetsCashThreshold, tradeCashValue, type Trade } from "./filter.js";
 import {
   createHolderCostAlert,
-  isMatchInMonitorWindow,
+  getHolderSportWindow,
+  isMatchEventInMonitorWindow,
   shouldAlertHolderCost,
   type HolderCostAlert,
   type MatchEvent
@@ -91,13 +92,13 @@ export async function scanOnce(config: AppConfig, dependencies: MonitorDependenc
 export async function scanHolderOnce(config: AppConfig, dependencies: MonitorDependencies): Promise<Alert[]> {
   const client = dependencies.client ?? new PolymarketClient();
   const now = dependencies.now?.() ?? new Date();
-  const schedule = await refreshHolderSchedule(client);
+  const schedule = await refreshHolderSchedule(client, config.holderEventScopePaths);
   return scanHolderSchedule(config, dependencies, schedule, now);
 }
 
 export async function runHolderMonitor(config: AppConfig, dependencies: MonitorDependencies): Promise<void> {
   const client = dependencies.client ?? new PolymarketClient();
-  let schedule = await refreshHolderSchedule(client);
+  let schedule = await refreshHolderSchedule(client, config.holderEventScopePaths);
   logHolderScheduleSummary(schedule, config);
   let lastRefreshDay = localDateKey(new Date());
 
@@ -106,14 +107,14 @@ export async function runHolderMonitor(config: AppConfig, dependencies: MonitorD
       const now = dependencies.now?.() ?? new Date();
       const today = localDateKey(now);
       if (today !== lastRefreshDay && localTimeKey(now) >= config.scheduleRefreshTimeLocal) {
-        schedule = await refreshHolderSchedule(client);
+        schedule = await refreshHolderSchedule(client, config.holderEventScopePaths);
         logHolderScheduleSummary(schedule, config);
         lastRefreshDay = today;
       }
 
       const alerts = await scanHolderSchedule(config, { ...dependencies, client }, schedule, now);
       const activeMatches = schedule.filter((match) =>
-        isMatchInMonitorWindow(match.gameStartTime, now, config.prematchMonitorMinutes, config.matchMonitorDurationMinutes)
+        isMatchEventInMonitorWindow(match, now, config.prematchMonitorMinutes, config.matchMonitorDurationMinutes, config.holderSportWindows)
       ).length;
       console.log(`[${new Date().toISOString()}] holder scan complete, activeMatches=${activeMatches}, alerts=${alerts.length}`);
     } catch (error) {
@@ -124,8 +125,9 @@ export async function runHolderMonitor(config: AppConfig, dependencies: MonitorD
   }
 }
 
-export async function refreshHolderSchedule(client: PolymarketClient): Promise<MatchEvent[]> {
-  const slugs = await client.fetchWorldCupGameSlugs();
+export async function refreshHolderSchedule(client: PolymarketClient, scopePaths = ["world-cup"]): Promise<MatchEvent[]> {
+  const slugGroups = await Promise.all(scopePaths.map((scopePath) => client.fetchEventSlugsForScope(scopePath)));
+  const slugs = [...new Set(slugGroups.flat())];
   const events: MatchEvent[] = [];
   for (const slug of slugs) {
     try {
@@ -149,7 +151,7 @@ export async function scanHolderSchedule(
   const client = dependencies.client ?? new PolymarketClient();
   const alerts: Alert[] = [];
   const activeMatches = schedule.filter((match) =>
-    isMatchInMonitorWindow(match.gameStartTime, now, config.prematchMonitorMinutes, config.matchMonitorDurationMinutes)
+    isMatchEventInMonitorWindow(match, now, config.prematchMonitorMinutes, config.matchMonitorDurationMinutes, config.holderSportWindows)
   );
 
   for (const match of activeMatches) {
@@ -339,9 +341,10 @@ function logHolderScheduleSummary(schedule: MatchEvent[], config: AppConfig): vo
   );
 
   for (const match of nextMatches) {
-    const window = formatMonitorWindow(match.gameStartTime, config.prematchMonitorMinutes, config.matchMonitorDurationMinutes);
+    const sportWindow = getHolderSportWindow(match.sport, config.prematchMonitorMinutes, config.matchMonitorDurationMinutes, config.holderSportWindows);
+    const window = formatMonitorWindow(match.gameStartTime, sportWindow.prematchMinutes, sportWindow.postMatchMinutes);
     console.log(
-      `[${new Date().toISOString()}] holder schedule match=${match.slug}, kickoff=${window.kickoff}, monitorStart=${window.start}, monitorEnd=${window.end}, markets=${match.markets.length}`
+      `[${new Date().toISOString()}] holder schedule match=${match.slug}, sport=${match.sport ?? "unknown"}, kickoff=${window.kickoff}, monitorStart=${window.start}, monitorEnd=${window.end}, markets=${match.markets.length}`
     );
   }
 }

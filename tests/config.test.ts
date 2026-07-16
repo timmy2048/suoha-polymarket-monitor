@@ -15,6 +15,12 @@ describe("configuration defaults", () => {
     expect(config.scheduleRefreshMode).toBe("daily");
     expect(config.scheduleRefreshTimeLocal).toBe("00:05");
     expect(config.holderRankLimit).toBe(1);
+    expect(config.holderEventScopePaths).toEqual(["world-cup"]);
+    expect(config.holderSportWindows).toMatchObject({
+      soccer: { prematchMinutes: 30, postMatchMinutes: 105 },
+      basketball: { prematchMinutes: 30, postMatchMinutes: 180 },
+      tennis: { prematchMinutes: 30, postMatchMinutes: 240 }
+    });
     expect(config.minTradeUsdc).toBe(50_000);
     expect(config.tradeFetchLimit).toBe(500);
     expect(config.cumulativeWindowSeconds).toBe(300);

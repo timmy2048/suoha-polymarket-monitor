@@ -185,6 +185,29 @@ export class PolymarketClient {
     }
   }
 
+  async fetchEventSlugsForScope(scopePath: string): Promise<string[]> {
+    const normalized = scopePath.trim().toLowerCase().replace(/^\/+|\/+$/g, "");
+    if (normalized === "world-cup") {
+      return this.fetchWorldCupGameSlugs();
+    }
+
+    const parts = normalized.split("/").filter((part) => part && part !== "games");
+    const leaf = parts.at(-1);
+    if (!leaf) {
+      return [];
+    }
+
+    const [tag, tagEvents, series] = await Promise.all([
+      this.fetchTagBySlug(leaf).catch(() => null),
+      this.fetchEventsByTagSlug(leaf).catch(() => []),
+      this.fetchSeriesBySlug(leaf).catch(() => [])
+    ]);
+    const tagEventsById = tag?.id === undefined ? [] : await this.fetchEventsByTagId(String(tag.id)).catch(() => []);
+    return [...new Set([...tagEvents, ...tagEventsById, ...series.flatMap((item) => item.events ?? [])]
+      .map((event) => event.slug)
+      .filter((slug): slug is string => Boolean(slug)))].sort();
+  }
+
   async fetchMatchEvent(slug: string): Promise<MatchEvent | null> {
     const [baseEvent, moreEvent] = await Promise.all([this.fetchGammaEvent(slug), this.fetchGammaEvent(`${slug}-more-markets`)]);
     const event = baseEvent ?? moreEvent;
@@ -202,6 +225,7 @@ export class PolymarketClient {
       slug: event.slug,
       title: event.title,
       gameStartTime,
+      sport: eventSport(event.sport) ?? event.slug.split("-")[0],
       markets
     };
   }
@@ -454,6 +478,13 @@ function normalizeHolderMarkets(event: PolymarketGammaEvent | null, fallbackGame
       };
     })
     .filter((market): market is HolderMarket => market !== null);
+}
+
+function eventSport(value: string | { sport?: string } | undefined): string | undefined {
+  if (typeof value === "string") {
+    return value;
+  }
+  return value?.sport;
 }
 
 function normalizePosition(record: PolymarketPosition): HolderPosition | null {

@@ -38,6 +38,8 @@ export interface StartupNotificationSettings {
   sportsCatalogRefreshMs?: number;
   worldCupEventSlugs?: string[];
   worldCupEventPrefixes?: string[];
+  holderEventScopePaths?: string[];
+  holderSportWindows?: Record<string, { prematchMinutes: number; postMatchMinutes: number }>;
 }
 
 const LARGE_TRADE_KEYWORD = "\u8ddf\u5355";
@@ -276,6 +278,8 @@ export function formatStartupMarkdown(settings: StartupNotificationSettings): Di
       `- Top Holder \u8f6e\u8be2: ${(settings.holderPollIntervalMs ?? 0) / 1000} \u79d2`,
       `- Top Holder \u8d5b\u524d\u7a97\u53e3: ${settings.prematchMonitorMinutes ?? 0} \u5206\u949f`,
       `- Top Holder \u6bd4\u8d5b\u7a97\u53e3: ${settings.matchMonitorDurationMinutes ?? 0} \u5206\u949f`,
+      `- Top Holder \u8d5b\u4e8b\u8303\u56f4: ${(settings.holderEventScopePaths ?? []).join(", ") || "default"}`,
+      `- Top Holder \u65f6\u95f4\u89c4\u5219: ${formatSportWindows(settings.holderSportWindows)}`,
       `- Holder \u589e\u91cf\u63d0\u9192: ${formatNumber(settings.holderChangeAlertUsdc ?? 0)} USDC`,
       `- \u542f\u52a8\u65f6\u95f4: ${formatUtcAndBeijing(new Date())}`
     ].join("\n")
@@ -284,4 +288,13 @@ export function formatStartupMarkdown(settings: StartupNotificationSettings): Di
 
 function formatNumber(value: number): string {
   return new Intl.NumberFormat("en-US", { minimumFractionDigits: 2, maximumFractionDigits: 2 }).format(value);
+}
+
+function formatSportWindows(windows: StartupNotificationSettings["holderSportWindows"]): string {
+  if (!windows) {
+    return "default";
+  }
+  return Object.entries(windows)
+    .map(([sport, window]) => `${sport}:${window.prematchMinutes}/${window.postMatchMinutes}`)
+    .join(", ");
 }
