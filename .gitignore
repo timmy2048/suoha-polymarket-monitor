@@ -1,0 +1,10 @@
+node_modules/
+dist/
+data/
+.env
+.env.local
+.env.*.local
+config/watchlist.local.json
+*.pem
+*.key
+*.log
