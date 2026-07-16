@@ -127,6 +127,20 @@ describe("DingTalk notifier", () => {
     await expect(notifier.send(largeAlert)).rejects.toThrow("DingTalk webhook failed with 400: bad request");
   });
 
+  it("checks DingTalk business errors even when HTTP status is 200", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify({ errcode: 310000, errmsg: "keyword not found" })
+    });
+    const notifier = new DingTalkNotifier({
+      webhookUrl: "https://example.test/dingtalk",
+      fetchImpl: fetchMock
+    });
+
+    await expect(notifier.send(largeAlert)).rejects.toThrow("errcode 310000: keyword not found");
+  });
+
   it("formats startup notification with monitor settings", () => {
     const message = formatStartupMarkdown({
       channel: "large-trade",

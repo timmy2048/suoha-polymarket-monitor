@@ -65,10 +65,33 @@ export class DingTalkNotifier implements Notifier {
       body: JSON.stringify({ msgtype: "markdown", markdown })
     });
 
+    const body = await response.text();
     if (!response.ok) {
-      const body = await response.text();
       throw new Error(`DingTalk webhook failed with ${response.status}: ${body}`);
     }
+
+    const result = parseDingTalkResult(body);
+    if (result && result.errcode !== 0) {
+      throw new Error(`DingTalk webhook rejected message with errcode ${result.errcode}: ${result.errmsg ?? "unknown error"}`);
+    }
+  }
+}
+
+function parseDingTalkResult(body: string): { errcode: number; errmsg?: string } | null {
+  if (!body.trim()) {
+    return null;
+  }
+  try {
+    const parsed = JSON.parse(body) as { errcode?: unknown; errmsg?: unknown };
+    if (typeof parsed.errcode !== "number") {
+      return null;
+    }
+    return {
+      errcode: parsed.errcode,
+      errmsg: typeof parsed.errmsg === "string" ? parsed.errmsg : undefined
+    };
+  } catch {
+    return null;
   }
 }
 
