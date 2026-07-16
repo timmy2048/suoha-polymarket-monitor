@@ -20,10 +20,13 @@ const envSchema = z.object({
   HOLDER_RANK_LIMIT: z.coerce.number().int().positive().default(1),
   HOLDER_EVENT_SCOPE_PATHS: z.string().default("world-cup"),
   HOLDER_SPORT_WINDOWS: z.string().default("soccer:30:105,basketball:30:180,tennis:30:240,baseball:30:240,hockey:30:150,football:30:210"),
+  HOLDER_MARKET_TYPES: z.string().default("moneyline,spreads,totals,match_handicap,tennis_completed_match,tennis_match_totals,tennis_first_set_totals,tennis_first_set_winner,tennis_set_games_totals,tennis_set_handicap,tennis_set_totals,tennis_set_winner,cricket_completed_match,cricket_first_inning_runs,cricket_second_inning_runs,cricket_match_to_go_till,baseball_game_extra_innings,baseball_team_first_five_spread,baseball_team_first_five_total,baseball_team_first_five_winner,nrfi,ufc_go_the_distance,ufc_method_of_victory"),
+  HOLDER_SCHEDULE_LOOKAHEAD_DAYS: z.coerce.number().int().nonnegative().default(3),
   LARGE_TRADE_THRESHOLD_USDC: z.coerce.number().positive().optional(),
   LARGE_TRADE_MIN_CANDIDATE_USDC: z.coerce.number().positive().optional(),
   LARGE_TRADE_CUMULATIVE_WINDOW_SECONDS: z.coerce.number().int().positive().optional(),
   LARGE_TRADE_POLL_INTERVAL_SECONDS: z.coerce.number().int().positive().optional(),
+  LARGE_TRADE_MARKET_FILTER_MAX_CONDITIONS: z.coerce.number().int().positive().default(1000),
   MIN_TRADE_USDC: z.coerce.number().positive().default(50_000),
   TRADE_FETCH_LIMIT: z.coerce.number().int().positive().default(500),
   CUMULATIVE_WINDOW_SECONDS: z.coerce.number().int().positive().default(300),
@@ -60,10 +63,13 @@ export interface AppConfig {
   holderRankLimit: number;
   holderEventScopePaths: string[];
   holderSportWindows: Record<string, HolderSportWindow>;
+  holderMarketTypes?: string[];
+  holderScheduleLookaheadDays?: number;
   minTradeUsdc: number;
   tradeFetchLimit: number;
   cumulativeWindowSeconds: number;
   pollIntervalMs: number;
+  largeTradeMarketFilterMaxConditions?: number;
   watchlistFile: string;
   addressSportsScopePaths: string[];
   sportsCatalogRefreshMs: number;
@@ -106,10 +112,13 @@ export function readConfig(env: NodeJS.ProcessEnv = process.env): AppConfig {
     holderRankLimit: parsed.HOLDER_RANK_LIMIT,
     holderEventScopePaths: splitCsv(parsed.HOLDER_EVENT_SCOPE_PATHS),
     holderSportWindows: parseHolderSportWindows(parsed.HOLDER_SPORT_WINDOWS),
+    holderMarketTypes: splitCsv(parsed.HOLDER_MARKET_TYPES),
+    holderScheduleLookaheadDays: parsed.HOLDER_SCHEDULE_LOOKAHEAD_DAYS,
     minTradeUsdc,
     tradeFetchLimit: parsed.TRADE_FETCH_LIMIT,
     cumulativeWindowSeconds,
     pollIntervalMs: pollIntervalSeconds * 1000,
+    largeTradeMarketFilterMaxConditions: parsed.LARGE_TRADE_MARKET_FILTER_MAX_CONDITIONS,
     watchlistFile: path.resolve(parsed.WATCHLIST_FILE),
     addressSportsScopePaths: splitCsv(parsed.ADDRESS_SPORTS_SCOPE_PATHS),
     sportsCatalogRefreshMs: parsed.SPORTS_CATALOG_REFRESH_SECONDS * 1000,

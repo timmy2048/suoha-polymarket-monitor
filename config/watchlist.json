@@ -1,6 +1,37 @@
 {
   "largeTradeScopes": [
-    "world-cup"
+    "world-cup",
+    "mlb",
+    "ufc",
+    "atp",
+    "wta",
+    "itf",
+    "atp-doubles",
+    "wta-doubles",
+    "mlc",
+    "international",
+    "lpl",
+    "t20-blast",
+    "shpageeza",
+    "wnba",
+    "bsn",
+    "nba",
+    "nba-summer-league",
+    "cfl",
+    "nfl",
+    "cfb",
+    "pll",
+    "wll",
+    "bolivia-lfpb",
+    "uel",
+    "mls",
+    "uefa-europa-conference-league",
+    "chinese-super-league",
+    "brazil-serie-a",
+    "liga-mx",
+    "australia-cup",
+    "k-league",
+    "primera-division-argentina"
   ],
   "wallets": []
 }

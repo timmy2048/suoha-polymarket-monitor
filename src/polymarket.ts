@@ -4,12 +4,14 @@ import type { Trade } from "./filter.js";
 import {
   classifyTargetMarket,
   isTargetHolderMarket,
+  DEFAULT_HOLDER_MARKET_TYPES,
   type HolderMarket,
   type HolderPosition,
   type MatchEvent,
   type TopHolder
 } from "./holder.js";
 import { createDefaultFetch } from "./http.js";
+import { expandScopeAliases, scopeSearchQuery } from "./sports.js";
 import type {
   SportsEventRecord,
   SportsMetadataRecord,
@@ -48,9 +50,14 @@ interface PolymarketGammaMarket {
   question?: string;
   conditionId?: string;
   gameStartTime?: string;
+  eventStartTime?: string;
+  startTime?: string;
+  endDate?: string;
   outcomes?: string;
   clobTokenIds?: string;
   groupItemTitle?: string;
+  sportsMarketType?: string;
+  line?: number | string;
 }
 
 export interface TradeQueryOptions {
@@ -191,24 +198,37 @@ export class PolymarketClient {
       return this.fetchWorldCupGameSlugs();
     }
 
-    const parts = normalized.split("/").filter((part) => part && part !== "games");
-    const leaf = parts.at(-1);
-    if (!leaf) {
+    const aliases = expandScopeAliases(normalized);
+    if (aliases.length === 0) {
       return [];
     }
 
-    const [tag, tagEvents, series] = await Promise.all([
-      this.fetchTagBySlug(leaf).catch(() => null),
-      this.fetchEventsByTagSlug(leaf).catch(() => []),
-      this.fetchSeriesBySlug(leaf).catch(() => [])
-    ]);
-    const tagEventsById = tag?.id === undefined ? [] : await this.fetchEventsByTagId(String(tag.id)).catch(() => []);
-    return [...new Set([...tagEvents, ...tagEventsById, ...series.flatMap((item) => item.events ?? [])]
-      .map((event) => event.slug)
-      .filter((slug): slug is string => Boolean(slug)))].sort();
+    const resolved = await Promise.all(
+      aliases.map(async (alias) => {
+        const [tag, series] = await Promise.all([
+          this.fetchTagBySlug(alias).catch(() => null),
+          this.fetchSeriesBySlug(alias).catch(() => [])
+        ]);
+        let tagEvents = tag?.id === undefined
+          ? await this.fetchEventsByTagSlug(alias).catch(() => [])
+          : await this.fetchEventsByTagId(String(tag.id)).catch(() => []);
+        if (tag?.id !== undefined && tagEvents.length === 0) {
+          tagEvents = await this.fetchEventsByTagSlug(alias).catch(() => []);
+        }
+        return [...tagEvents, ...series.flatMap((item) => item.events ?? [])];
+      })
+    );
+    const events = resolved.flat();
+    if (events.length === 0) {
+      const query = scopeSearchQuery(normalized);
+      if (query) {
+        events.push(...(await this.fetchEventsBySearch(query).catch(() => [])));
+      }
+    }
+    return [...new Set(events.map((event) => event.slug).filter((slug): slug is string => Boolean(slug)))].sort();
   }
 
-  async fetchMatchEvent(slug: string): Promise<MatchEvent | null> {
+  async fetchMatchEvent(slug: string, allowedSportsMarketTypes: readonly string[] = DEFAULT_HOLDER_MARKET_TYPES): Promise<MatchEvent | null> {
     const [baseEvent, moreEvent] = await Promise.all([this.fetchGammaEvent(slug), this.fetchGammaEvent(`${slug}-more-markets`)]);
     const event = baseEvent ?? moreEvent;
     if (!event) {
@@ -220,7 +240,10 @@ export class PolymarketClient {
       return null;
     }
 
-    const markets = [...normalizeHolderMarkets(baseEvent, gameStartTime), ...normalizeHolderMarkets(moreEvent, gameStartTime)];
+    const markets = [
+      ...normalizeHolderMarkets(baseEvent, gameStartTime, allowedSportsMarketTypes),
+      ...normalizeHolderMarkets(moreEvent, gameStartTime, allowedSportsMarketTypes)
+    ];
     return {
       slug: event.slug,
       title: event.title,
@@ -234,17 +257,21 @@ export class PolymarketClient {
     const url = new URL(`${this.dataEndpoint}/holders`);
     url.searchParams.set("market", conditionId);
     url.searchParams.set("limit", String(limit));
-    const payload = (await this.fetchJson(url.toString())) as PolymarketHolderToken[];
-    return payload.flatMap((group) =>
-      (group.holders ?? []).slice(0, limit).map((holder) => ({
+    const payload = await this.fetchJson(url.toString());
+    return asArray(payload).flatMap((group) => {
+      if (!group || typeof group !== "object") {
+        return [];
+      }
+      const tokenGroup = group as PolymarketHolderToken;
+      return (tokenGroup.holders ?? []).slice(0, limit).map((holder) => ({
         wallet: holder.proxyWallet,
         name: holder.name,
         pseudonym: holder.pseudonym,
-        tokenId: holder.asset ?? group.token,
+        tokenId: holder.asset ?? tokenGroup.token,
         outcomeIndex: Number(holder.outcomeIndex),
         shares: Number(holder.amount)
-      }))
-    ).filter((holder) => holder.wallet && holder.tokenId && Number.isFinite(holder.outcomeIndex) && Number.isFinite(holder.shares));
+      }));
+    }).filter((holder) => holder.wallet && holder.tokenId && Number.isFinite(holder.outcomeIndex) && Number.isFinite(holder.shares));
   }
 
   async fetchHolderPositions(wallet: string, conditionId: string): Promise<HolderPosition[]> {
@@ -283,6 +310,17 @@ export class PolymarketClient {
     url.searchParams.set("closed", "false");
     url.searchParams.set("limit", "500");
     return asArray(await this.fetchJson(url.toString())) as SportsEventRecord[];
+  }
+
+  async fetchEventsBySearch(query: string): Promise<SportsEventRecord[]> {
+    const url = new URL(`${this.gammaEndpoint}/public-search`);
+    url.searchParams.set("q", query);
+    url.searchParams.set("limit", "100");
+    const payload = await this.fetchJson(url.toString());
+    const events = payload && typeof payload === "object" && Array.isArray((payload as { events?: unknown }).events)
+      ? (payload as { events: SportsEventRecord[] }).events
+      : [];
+    return events.filter((event) => event.active !== false && event.closed !== true);
   }
 
   async fetchSeriesBySlug(slug: string): Promise<SportsSeriesRecord[]> {
@@ -396,7 +434,7 @@ async function fetchPageHtmlWithCurl(url: string): Promise<string> {
 }
 
 function isRetryableResponse(response: Response): boolean {
-  return response.status === 408 || response.status >= 500;
+  return response.status === 408 || response.status === 429 || response.status >= 500;
 }
 
 function describeError(error: unknown): string {
@@ -443,19 +481,32 @@ export function normalizePolymarketTrade(record: PolymarketTrade): Trade | null 
   };
 }
 
-function normalizeHolderMarkets(event: PolymarketGammaEvent | null, fallbackGameStartTime: string): HolderMarket[] {
+function normalizeHolderMarkets(
+  event: PolymarketGammaEvent | null,
+  fallbackGameStartTime: string,
+  allowedSportsMarketTypes: readonly string[]
+): HolderMarket[] {
   if (!event) {
     return [];
   }
 
   return (event.markets ?? [])
-    .map((market) => {
+    .map((market): HolderMarket | null => {
       const type = classifyTargetMarket(market);
       const outcomes = parseJsonStringArray(market.outcomes);
       const clobTokenIds = parseJsonStringArray(market.clobTokenIds);
+      const sport = eventSport(event.sport) ?? event.slug.split("-")[0];
       if (
         !type ||
-        !isTargetHolderMarket({ type, slug: market.slug }) ||
+        !isTargetHolderMarket({
+          type,
+          slug: market.slug,
+          question: market.question,
+          sportsMarketType: market.sportsMarketType,
+          line: market.line,
+          sport,
+          allowedSportsMarketTypes
+        }) ||
         !market.slug ||
         !market.question ||
         !market.conditionId ||
@@ -468,11 +519,22 @@ function normalizeHolderMarkets(event: PolymarketGammaEvent | null, fallbackGame
       return {
         eventSlug: event.slug,
         eventTitle: event.title,
-        gameStartTime: market.gameStartTime ?? event.gameStartTime ?? event.eventStartTime ?? event.startTime ?? event.endDate ?? fallbackGameStartTime,
+        gameStartTime:
+          market.gameStartTime ??
+          market.eventStartTime ??
+          market.startTime ??
+          market.endDate ??
+          event.gameStartTime ??
+          event.eventStartTime ??
+          event.startTime ??
+          event.endDate ??
+          fallbackGameStartTime,
         slug: market.slug,
         question: market.question,
         conditionId: market.conditionId,
         type,
+        sportsMarketType: market.sportsMarketType,
+        line: Number.isFinite(Number(market.line)) ? Number(market.line) : undefined,
         outcomes,
         clobTokenIds
       };

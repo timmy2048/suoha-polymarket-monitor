@@ -119,3 +119,12 @@ python scripts/check_vps_monitor.py
 ```
 
 部署脚本不会上传本地 `.env`。VPS 上需要预先维护 `/opt/suoha-polymarket-monitor/.env`，并确认两个钉钉 Webhook 都在远端环境变量中。systemd 服务名为 `suoha-polymarket-monitor.service`。
+## Sports expansion
+
+The configured watchlist now includes MLB, UFC, ATP/WTA/ITF and doubles
+tennis, cricket leagues, WNBA/BSN/NBA, NFL/CFL/CFB, PLL/WLL, and the listed
+soccer competitions. Canonical aliases and official Polymarket
+`sportsMarketType` rules are documented in `docs/sports-market-catalog.md`.
+Large trades use every market in `largeTradeScopes`; Top Holder uses only the
+configured game-level Holder types. The default Holder lookahead is three
+calendar days and can be changed with `HOLDER_SCHEDULE_LOOKAHEAD_DAYS`.

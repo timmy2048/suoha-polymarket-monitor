@@ -76,7 +76,8 @@ async function sendStartupNotifications(config: AppConfig, notifier: Notifier): 
     worldCupEventSlugs: config.worldCupEventSlugs,
     worldCupEventPrefixes: config.worldCupEventPrefixes,
     holderEventScopePaths: config.holderEventScopePaths,
-    holderSportWindows: config.holderSportWindows
+    holderSportWindows: config.holderSportWindows,
+    holderMarketTypes: config.holderMarketTypes
   });
 
 }

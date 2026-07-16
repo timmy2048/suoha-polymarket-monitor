@@ -15,7 +15,10 @@ export async function scanLargeTradesOnce(
   watchlist: Watchlist,
   now = dependencies.now?.() ?? new Date()
 ): Promise<Alert[]> {
-  if (watchlist.largeTradeScopes.length === 0 || catalog.conditionIds.size === 0) {
+  if (
+    watchlist.largeTradeScopes.length === 0 ||
+    (catalog.conditionIds.size === 0 && catalog.eventSlugs.size === 0 && catalog.marketSlugs.size === 0)
+  ) {
     return [];
   }
 
@@ -25,11 +28,13 @@ export async function scanLargeTradesOnce(
   const conditionIds = [...catalog.conditionIds];
   const trades: Trade[] = [];
 
-  for (const batch of chunks(conditionIds, CONDITION_BATCH_SIZE)) {
+  if (conditionIds.length === 0 || conditionIds.length > (config.largeTradeMarketFilterMaxConditions ?? 1_000)) {
+    console.warn(
+      `[${new Date().toISOString()}] large trade catalog has ${conditionIds.length} conditions; using one global candidate query and catalog filtering`
+    );
     trades.push(
       ...(await client.fetchRecentTrades({
         limit: config.tradeFetchLimit,
-        market: batch,
         takerOnly: false,
         filterType: "CASH",
         filterAmount: config.minTradeUsdc,
@@ -37,6 +42,20 @@ export async function scanLargeTradesOnce(
         end: nowEpochSeconds
       }))
     );
+  } else {
+    for (const batch of chunks(conditionIds, CONDITION_BATCH_SIZE)) {
+      trades.push(
+        ...(await client.fetchRecentTrades({
+          limit: config.tradeFetchLimit,
+          market: batch,
+          takerOnly: false,
+          filterType: "CASH",
+          filterAmount: config.minTradeUsdc,
+          start,
+          end: nowEpochSeconds
+        }))
+      );
+    }
   }
 
   const eligible = trades.filter((trade) => matchesSportsCatalog(trade, catalog));

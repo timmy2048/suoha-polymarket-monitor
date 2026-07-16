@@ -14,7 +14,7 @@ export async function scanCombinedOnce(
   const client = dependencies.client ?? new PolymarketClient();
   const watchlist = await loadWatchlist(config.watchlistFile);
   const catalog = await refreshCatalog(config, client, watchlist);
-  const schedule = await refreshHolderSchedule(client, config.holderEventScopePaths);
+  const schedule = await refreshHolderSchedule(client, config.holderEventScopePaths, config.holderMarketTypes, config.holderScheduleLookaheadDays);
   const alerts: Alert[] = [];
 
   alerts.push(...(await scanLargeTradesOnce(config, { ...dependencies, client }, catalog, watchlist, now)));
@@ -28,7 +28,7 @@ export async function runCombinedMonitor(config: AppConfig, dependencies: Monito
   const client = dependencies.client ?? new PolymarketClient();
   let watchlist = await loadWatchlist(config.watchlistFile);
   let catalog = await refreshCatalog(config, client, watchlist);
-  let holderSchedule = (await safeRefreshHolderSchedule(client, config.holderEventScopePaths)) ?? [];
+  let holderSchedule = (await safeRefreshHolderSchedule(client, config.holderEventScopePaths, config.holderMarketTypes, config.holderScheduleLookaheadDays)) ?? [];
   let lastCatalogRefreshMs = Date.now();
   let lastWatchlistRefreshMs = Date.now();
   let nextLargeTradeMs = 0;
@@ -69,7 +69,7 @@ export async function runCombinedMonitor(config: AppConfig, dependencies: Monito
       localTimeKey(now) >= config.scheduleRefreshTimeLocal &&
       nowMs >= nextHolderScheduleRetryMs
     ) {
-      const refreshedSchedule = await safeRefreshHolderSchedule(client, config.holderEventScopePaths);
+      const refreshedSchedule = await safeRefreshHolderSchedule(client, config.holderEventScopePaths, config.holderMarketTypes, config.holderScheduleLookaheadDays);
       if (refreshedSchedule) {
         holderSchedule = refreshedSchedule;
         lastHolderScheduleDay = localDay;
@@ -157,9 +157,14 @@ async function runHolderScan(
   }
 }
 
-async function safeRefreshHolderSchedule(client: PolymarketClient, scopePaths: string[]): Promise<Awaited<ReturnType<typeof refreshHolderSchedule>> | null> {
+async function safeRefreshHolderSchedule(
+  client: PolymarketClient,
+  scopePaths: string[],
+  holderMarketTypes?: string[],
+  scheduleLookaheadDays?: number
+): Promise<Awaited<ReturnType<typeof refreshHolderSchedule>> | null> {
   try {
-    return await refreshHolderSchedule(client, scopePaths);
+    return await refreshHolderSchedule(client, scopePaths, holderMarketTypes, scheduleLookaheadDays);
   } catch (error) {
     console.error(`[${new Date().toISOString()}] holder schedule refresh failed`, error);
     return null;

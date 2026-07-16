@@ -114,6 +114,18 @@ describe("PolymarketClient", () => {
     expect(String(fetchMock.mock.calls[1][0])).toContain("limit=10");
   });
 
+  it("treats a null holders response as no holders", async () => {
+    const fetchMock = vi.fn().mockResolvedValue({ ok: true, status: 200, json: async () => null });
+    const client = new PolymarketClient({
+      dataEndpoint: "https://example.test",
+      fetchImpl: fetchMock,
+      retryDelayMs: 0,
+      maxRetries: 0
+    });
+
+    await expect(client.fetchTopHolders("0xcondition")).resolves.toEqual([]);
+  });
+
   it("extracts unique World Cup match slugs from page html", () => {
     expect(
       extractWorldCupGameSlugs(
@@ -179,7 +191,6 @@ describe("PolymarketClient", () => {
     const fetchMock = vi
       .fn()
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => ({ id: 7, slug: "nba" }) })
-      .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [{ slug: "nba-tag-event" }] })
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [{ events: [{ slug: "nba-series-event" }] }] })
       .mockResolvedValueOnce({ ok: true, status: 200, json: async () => [{ slug: "nba-id-event" }] });
     const client = new PolymarketClient({
@@ -191,8 +202,7 @@ describe("PolymarketClient", () => {
 
     await expect(client.fetchEventSlugsForScope("nba/games")).resolves.toEqual([
       "nba-id-event",
-      "nba-series-event",
-      "nba-tag-event"
+      "nba-series-event"
     ]);
   });
 });

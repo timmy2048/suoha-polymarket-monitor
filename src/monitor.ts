@@ -92,13 +92,13 @@ export async function scanOnce(config: AppConfig, dependencies: MonitorDependenc
 export async function scanHolderOnce(config: AppConfig, dependencies: MonitorDependencies): Promise<Alert[]> {
   const client = dependencies.client ?? new PolymarketClient();
   const now = dependencies.now?.() ?? new Date();
-  const schedule = await refreshHolderSchedule(client, config.holderEventScopePaths);
+  const schedule = await refreshHolderSchedule(client, config.holderEventScopePaths, config.holderMarketTypes, config.holderScheduleLookaheadDays);
   return scanHolderSchedule(config, dependencies, schedule, now);
 }
 
 export async function runHolderMonitor(config: AppConfig, dependencies: MonitorDependencies): Promise<void> {
   const client = dependencies.client ?? new PolymarketClient();
-  let schedule = await refreshHolderSchedule(client, config.holderEventScopePaths);
+  let schedule = await refreshHolderSchedule(client, config.holderEventScopePaths, config.holderMarketTypes, config.holderScheduleLookaheadDays);
   logHolderScheduleSummary(schedule, config);
   let lastRefreshDay = localDateKey(new Date());
 
@@ -107,7 +107,7 @@ export async function runHolderMonitor(config: AppConfig, dependencies: MonitorD
       const now = dependencies.now?.() ?? new Date();
       const today = localDateKey(now);
       if (today !== lastRefreshDay && localTimeKey(now) >= config.scheduleRefreshTimeLocal) {
-        schedule = await refreshHolderSchedule(client, config.holderEventScopePaths);
+        schedule = await refreshHolderSchedule(client, config.holderEventScopePaths, config.holderMarketTypes, config.holderScheduleLookaheadDays);
         logHolderScheduleSummary(schedule, config);
         lastRefreshDay = today;
       }
@@ -125,21 +125,59 @@ export async function runHolderMonitor(config: AppConfig, dependencies: MonitorD
   }
 }
 
-export async function refreshHolderSchedule(client: PolymarketClient, scopePaths = ["world-cup"]): Promise<MatchEvent[]> {
-  const slugGroups = await Promise.all(scopePaths.map((scopePath) => client.fetchEventSlugsForScope(scopePath)));
-  const slugs = [...new Set(slugGroups.flat())];
-  const events: MatchEvent[] = [];
-  for (const slug of slugs) {
+export async function refreshHolderSchedule(
+  client: PolymarketClient,
+  scopePaths = ["world-cup"],
+  holderMarketTypes?: readonly string[],
+  scheduleLookaheadDays = 3
+): Promise<MatchEvent[]> {
+  const slugGroups = await mapWithConcurrency(scopePaths, 4, (scopePath) => client.fetchEventSlugsForScope(scopePath));
+  const slugs = [...new Set(slugGroups.flat())].filter((slug) => isLikelyScheduledMatchSlug(slug, new Date(), scheduleLookaheadDays));
+  const resolvedEvents = await mapWithConcurrency(slugs, 8, async (slug) => {
     try {
-      const event = await client.fetchMatchEvent(slug);
-      if (event && event.markets.length > 0) {
-        events.push(event);
-      }
+      const event = await client.fetchMatchEvent(slug, holderMarketTypes);
+      return event && event.markets.length > 0 ? event : null;
     } catch (error) {
       console.error(`[${new Date().toISOString()}] holder event refresh failed slug=${slug}`, error);
+      return null;
+    }
+  });
+  return resolvedEvents
+    .filter((event): event is MatchEvent => event !== null)
+    .sort((left, right) => Date.parse(left.gameStartTime) - Date.parse(right.gameStartTime));
+}
+
+function isLikelyScheduledMatchSlug(slug: string, now: Date, lookaheadDays: number): boolean {
+  const match = slug.match(/(?:^|-)(20\d{2}-\d{2}-\d{2})(?:-|$)/);
+  if (!match?.[1]) {
+    return false;
+  }
+
+  const today = localDateKey(now);
+  const todayMs = Date.parse(`${today}T00:00:00Z`);
+  const eventMs = Date.parse(`${match[1]}T00:00:00Z`);
+  if (!Number.isFinite(todayMs) || !Number.isFinite(eventMs)) {
+    return false;
+  }
+  return eventMs >= todayMs - 86_400_000 && eventMs <= todayMs + lookaheadDays * 86_400_000;
+}
+
+async function mapWithConcurrency<T, R>(values: T[], concurrency: number, mapper: (value: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(values.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= values.length) {
+        return;
+      }
+      results[index] = await mapper(values[index]);
     }
   }
-  return events.sort((left, right) => Date.parse(left.gameStartTime) - Date.parse(right.gameStartTime));
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, () => worker()));
+  return results;
 }
 
 export async function scanHolderSchedule(
@@ -154,64 +192,76 @@ export async function scanHolderSchedule(
     isMatchEventInMonitorWindow(match, now, config.prematchMonitorMinutes, config.matchMonitorDurationMinutes, config.holderSportWindows)
   );
 
-  for (const match of activeMatches) {
-    for (const market of match.markets) {
-      let holders: Awaited<ReturnType<PolymarketClient["fetchTopHolders"]>>;
+  const markets = activeMatches.flatMap((match) => match.markets);
+  const candidates = await mapWithConcurrency(markets, 8, async (market) => {
+    let holders: Awaited<ReturnType<PolymarketClient["fetchTopHolders"]>>;
+    try {
+      holders = await client.fetchTopHolders(market.conditionId, config.holderRankLimit);
+    } catch (error) {
+      console.error(`[${new Date().toISOString()}] holder top-holder query failed market=${market.slug}`, error);
+      return [];
+    }
+
+    const results: HolderCandidate[] = [];
+    for (const holder of holders) {
+      let positions: Awaited<ReturnType<PolymarketClient["fetchHolderPositions"]>>;
       try {
-        holders = await client.fetchTopHolders(market.conditionId, config.holderRankLimit);
+        positions = await client.fetchHolderPositions(holder.wallet, market.conditionId);
       } catch (error) {
-        console.error(`[${new Date().toISOString()}] holder top-holder query failed market=${market.slug}`, error);
+        console.error(
+          `[${new Date().toISOString()}] holder position query failed wallet=${holder.wallet} market=${market.slug}`,
+          error
+        );
         continue;
       }
-      for (const holder of holders) {
-        let positions: Awaited<ReturnType<PolymarketClient["fetchHolderPositions"]>>;
-        try {
-          positions = await client.fetchHolderPositions(holder.wallet, market.conditionId);
-        } catch (error) {
-          console.error(
-            `[${new Date().toISOString()}] holder position query failed wallet=${holder.wallet} market=${market.slug}`,
-            error
-          );
-          continue;
-        }
-        const position = positions.find((item) => item.tokenId === holder.tokenId);
-        if (!position) {
-          console.warn(`[${new Date().toISOString()}] missing holder position cost wallet=${holder.wallet} market=${market.slug} token=${holder.tokenId}`);
-          continue;
-        }
-
-        const key = [market.eventSlug, market.slug, holder.tokenId, holder.wallet.toLowerCase()].join("|");
-        const previous = dependencies.stateStore.getHolderAlert(key);
-        const holderAlert = createHolderCostAlert({ market, holder, position, previous });
-        if (!holderAlert || !shouldAlertHolderCost(holderAlert.costUsdc, previous, config.thresholdUsdc, config.holderChangeAlertUsdc)) {
-          continue;
-        }
-
-        const alert: Alert = {
-          key: holderAlert.key,
-          kind: "holder",
-          cashValue: holderAlert.costUsdc,
-          marketUrl: holderAlert.marketUrl,
-          holder: holderAlert
-        };
-        await dependencies.notifier.send(alert);
-        await dependencies.stateStore.markHolderAlert(holderAlert.key, {
-          wallet: holderAlert.wallet,
-          marketSlug: holderAlert.marketSlug,
-          outcomeTokenId: holderAlert.outcomeTokenId,
-          outcome: holderAlert.outcome,
-          lastAlertedCostUsdc: holderAlert.costUsdc,
-          shares: holderAlert.shares,
-          avgPrice: holderAlert.avgPrice,
-          lastAlertedAt: new Date().toISOString()
-        });
-        await dependencies.stateStore.appendAlert(config.alertsFile, alert);
-        alerts.push(alert);
+      const position = positions.find((item) => item.tokenId === holder.tokenId);
+      if (!position) {
+        console.warn(`[${new Date().toISOString()}] missing holder position cost wallet=${holder.wallet} market=${market.slug} token=${holder.tokenId}`);
+        continue;
       }
+      results.push({ market, holder, position });
     }
+    return results;
+  });
+
+  for (const candidate of candidates.flat()) {
+    const { market, holder, position } = candidate;
+    const key = [market.eventSlug, market.slug, holder.tokenId, holder.wallet.toLowerCase()].join("|");
+    const previous = dependencies.stateStore.getHolderAlert(key);
+    const holderAlert = createHolderCostAlert({ market, holder, position, previous });
+    if (!holderAlert || !shouldAlertHolderCost(holderAlert.costUsdc, previous, config.thresholdUsdc, config.holderChangeAlertUsdc)) {
+      continue;
+    }
+
+    const alert: Alert = {
+      key: holderAlert.key,
+      kind: "holder",
+      cashValue: holderAlert.costUsdc,
+      marketUrl: holderAlert.marketUrl,
+      holder: holderAlert
+    };
+    await dependencies.notifier.send(alert);
+    await dependencies.stateStore.markHolderAlert(holderAlert.key, {
+      wallet: holderAlert.wallet,
+      marketSlug: holderAlert.marketSlug,
+      outcomeTokenId: holderAlert.outcomeTokenId,
+      outcome: holderAlert.outcome,
+      lastAlertedCostUsdc: holderAlert.costUsdc,
+      shares: holderAlert.shares,
+      avgPrice: holderAlert.avgPrice,
+      lastAlertedAt: new Date().toISOString()
+    });
+    await dependencies.stateStore.appendAlert(config.alertsFile, alert);
+    alerts.push(alert);
   }
 
   return alerts;
+}
+
+interface HolderCandidate {
+  market: MatchEvent["markets"][number];
+  holder: Awaited<ReturnType<PolymarketClient["fetchTopHolders"]>>[number];
+  position: Awaited<ReturnType<PolymarketClient["fetchHolderPositions"]>>[number];
 }
 
 export async function runMonitor(config: AppConfig, dependencies: MonitorDependencies): Promise<void> {

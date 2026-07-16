@@ -40,6 +40,7 @@ export interface StartupNotificationSettings {
   worldCupEventPrefixes?: string[];
   holderEventScopePaths?: string[];
   holderSportWindows?: Record<string, { prematchMinutes: number; postMatchMinutes: number }>;
+  holderMarketTypes?: string[];
 }
 
 const LARGE_TRADE_KEYWORD = "\u8ddf\u5355";
@@ -213,6 +214,7 @@ function formatHolderMarkdown(alert: Alert, keyword: string): DingTalkMarkdownPa
       `- \u76d8\u53e3\u7c7b\u578b: ${holder.marketType}`,
       `- \u5e02\u573a: ${holder.marketTitle}`,
       `- Outcome: ${holder.outcome}`,
+      `- sportsMarketType: ${holder.sportsMarketType ?? holder.marketType}`,
       `- Top1: ${holderName}`,
       `- \u94b1\u5305: ${holder.wallet}`,
       `- \u4efd\u989d: ${formatNumber(holder.shares)}`,

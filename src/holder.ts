@@ -1,7 +1,33 @@
 import type { HolderAlertState } from "./state.js";
 import type { HolderSportWindow } from "./config.js";
 
-export type TargetMarketType = "moneyline" | "spread" | "total";
+export type TargetMarketType = "moneyline" | "spread" | "total" | "prop";
+
+export const DEFAULT_HOLDER_MARKET_TYPES = [
+  "moneyline",
+  "spreads",
+  "totals",
+  "match_handicap",
+  "tennis_completed_match",
+  "tennis_match_totals",
+  "tennis_first_set_totals",
+  "tennis_first_set_winner",
+  "tennis_set_games_totals",
+  "tennis_set_handicap",
+  "tennis_set_totals",
+  "tennis_set_winner",
+  "cricket_completed_match",
+  "cricket_first_inning_runs",
+  "cricket_second_inning_runs",
+  "cricket_match_to_go_till",
+  "baseball_game_extra_innings",
+  "baseball_team_first_five_spread",
+  "baseball_team_first_five_total",
+  "baseball_team_first_five_winner",
+  "nrfi",
+  "ufc_go_the_distance",
+  "ufc_method_of_victory"
+] as const;
 
 export interface MatchEvent {
   slug: string;
@@ -19,6 +45,8 @@ export interface HolderMarket {
   question: string;
   conditionId: string;
   type: TargetMarketType;
+  sportsMarketType?: string;
+  line?: number;
   outcomes: string[];
   clobTokenIds: string[];
 }
@@ -54,6 +82,7 @@ export interface HolderCostAlert {
   conditionId: string;
   outcome: string;
   outcomeTokenId: string;
+  sportsMarketType?: string;
   wallet: string;
   holderName?: string;
   holderPseudonym?: string;
@@ -107,15 +136,37 @@ export function getHolderSportWindow(
 
 export function normalizeSport(sport: string | undefined): string {
   const normalized = (sport ?? "").trim().toLowerCase();
+  if (/^(fifwc|uel|uecl|mls|csl|brseriea|mex|auc|kleague|arg)-/.test(normalized)) return "soccer";
+  if (/^(nba|nbasl|wnba|bkbsn|bk)-/.test(normalized)) return "basketball";
+  if (/^(atp|wta|itf)-/.test(normalized)) return "tennis";
+  if (/^mlb-/.test(normalized)) return "baseball";
+  if (/^cric/.test(normalized)) return "cricket";
+  if (/^ufc-/.test(normalized)) return "combat";
+  if (/^(cfl|nfl|cfb)-/.test(normalized)) return "american-football";
+  if (/^(pll|wll)-/.test(normalized)) return "lacrosse";
   if (["fifwc", "soccer", "football"].includes(normalized)) return "soccer";
-  if (["nba", "basketball"].includes(normalized)) return "basketball";
-  if (["atp", "wta", "tennis"].includes(normalized)) return "tennis";
+  if (["nba", "wnba", "bsn", "basketball"].includes(normalized)) return "basketball";
+  if (["atp", "wta", "itf", "tennis"].includes(normalized)) return "tennis";
   if (["mlb", "baseball"].includes(normalized)) return "baseball";
+  if (["mlc", "lpl", "t20-blast", "shpageeza", "international", "cricket"].includes(normalized)) return "cricket";
+  if (["ufc", "mma", "combat"].includes(normalized)) return "combat";
+  if (["cfl", "nfl", "cfb", "american-football"].includes(normalized)) return "american-football";
+  if (["pll", "wll", "lacrosse"].includes(normalized)) return "lacrosse";
   if (["nhl", "hockey"].includes(normalized)) return "hockey";
   return normalized;
 }
 
-export function classifyTargetMarket(market: { slug?: string; question?: string; groupItemTitle?: string }): TargetMarketType | null {
+export function classifyTargetMarket(market: {
+  slug?: string;
+  question?: string;
+  groupItemTitle?: string;
+  sportsMarketType?: string;
+}): TargetMarketType | null {
+  const sportsType = normalizeSportsMarketType(market.sportsMarketType);
+  if (sportsType) {
+    return categoryForSportsMarketType(sportsType);
+  }
+
   const slug = (market.slug ?? "").toLowerCase();
   const question = (market.question ?? "").toLowerCase();
   const groupItemTitle = (market.groupItemTitle ?? "").toLowerCase();
@@ -136,7 +187,31 @@ export function classifyTargetMarket(market: { slug?: string; question?: string;
   return null;
 }
 
-export function isTargetHolderMarket(market: { type: TargetMarketType; slug?: string }): boolean {
+export function isTargetHolderMarket(market: {
+  type: TargetMarketType;
+  slug?: string;
+  question?: string;
+  sportsMarketType?: string;
+  line?: number | string;
+  sport?: string;
+  allowedSportsMarketTypes?: readonly string[];
+}): boolean {
+  const sportsType = normalizeSportsMarketType(market.sportsMarketType);
+  if (sportsType) {
+    const allowedTypes = new Set(
+      (market.allowedSportsMarketTypes ?? DEFAULT_HOLDER_MARKET_TYPES).map(normalizeSportsMarketType).filter(Boolean)
+    );
+    if (!allowedTypes.has(sportsType)) {
+      return false;
+    }
+
+    const sport = normalizeSport(market.sport);
+    if (sport === "soccer" && (market.type === "spread" || market.type === "total")) {
+      return isSoccerLineInTargetRange(market);
+    }
+    return true;
+  }
+
   const slug = (market.slug ?? "").toLowerCase();
 
   if (market.type === "moneyline") {
@@ -158,6 +233,50 @@ export function isTargetHolderMarket(market: { type: TargetMarketType; slug?: st
   }
 
   return false;
+}
+
+export function normalizeSportsMarketType(value: string | undefined): string {
+  return (value ?? "").trim().toLowerCase().replace(/\s+/g, "_");
+}
+
+function categoryForSportsMarketType(value: string): TargetMarketType {
+  if (
+    value === "moneyline" ||
+    value === "tennis_completed_match" ||
+    value === "cricket_completed_match" ||
+    value === "baseball_team_first_five_winner" ||
+    value.endsWith("_winner") ||
+    value.endsWith("_match_result")
+  ) {
+    return "moneyline";
+  }
+  if (value.includes("spread") || value.includes("handicap")) {
+    return "spread";
+  }
+  if (value.includes("total") || value === "nrfi") {
+    return "total";
+  }
+  return "prop";
+}
+
+function isSoccerLineInTargetRange(market: { slug?: string; line?: number | string; type: TargetMarketType }): boolean {
+  const slug = (market.slug ?? "").toLowerCase();
+  const line =
+    parseMarketLine(market.line) ??
+    parseLineFromSlug(slug, /-spread-(?:home|away)-(\d+)pt5$/) ??
+    parseLineFromSlug(slug, /-total-(\d+)pt5$/);
+  if (line === null) {
+    return false;
+  }
+  if (market.type === "spread") {
+    return line === 1.5 || line === 2.5;
+  }
+  return line >= 1.5 && line <= 7.5;
+}
+
+function parseMarketLine(value: number | string | undefined): number | null {
+  const line = Number(value);
+  return Number.isFinite(line) ? Math.abs(line) : null;
 }
 
 function parseLineFromSlug(slug: string, pattern: RegExp): number | null {
@@ -233,6 +352,7 @@ export function createHolderCostAlert(params: {
     conditionId: params.market.conditionId,
     outcome,
     outcomeTokenId,
+    sportsMarketType: params.market.sportsMarketType,
     wallet: params.holder.wallet,
     holderName: params.holder.name,
     holderPseudonym: params.holder.pseudonym,

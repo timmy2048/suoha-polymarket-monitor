@@ -4,6 +4,14 @@ export interface SportsMarketRecord {
   conditionId?: string;
   condition_id?: string;
   slug?: string;
+  question?: string;
+  groupItemTitle?: string;
+  sportsMarketType?: string;
+  line?: number | string;
+  gameStartTime?: string;
+  eventStartTime?: string;
+  startTime?: string;
+  endDate?: string;
 }
 
 export interface SportsEventRecord {
@@ -15,6 +23,8 @@ export interface SportsEventRecord {
   eventStartTime?: string;
   gameStartTime?: string;
   endDate?: string;
+  active?: boolean;
+  closed?: boolean;
   markets?: SportsMarketRecord[];
 }
 
@@ -40,6 +50,7 @@ export interface SportsCatalogClient {
   fetchEventsByTagId(tagId: string): Promise<SportsEventRecord[]>;
   fetchEventsByTagSlug(slug: string): Promise<SportsEventRecord[]>;
   fetchSeriesBySlug(slug: string): Promise<SportsSeriesRecord[]>;
+  fetchEventsBySearch?(query: string): Promise<SportsEventRecord[]>;
 }
 
 export interface SportsScope {
@@ -60,11 +71,9 @@ export interface SportsCatalog {
 
 export async function buildSportsCatalog(client: SportsCatalogClient, scopePaths: string[]): Promise<SportsCatalog> {
   const normalizedPaths = [...new Set(scopePaths.map(normalizeScopePath).filter(Boolean))];
-  const scopes: SportsScope[] = [];
-
-  for (const path of normalizedPaths) {
+  const scopes = await mapWithConcurrency(normalizedPaths, 4, async (path) => {
     const events = await resolveScopeEvents(client, path);
-    scopes.push({
+    return {
       path,
       events,
       conditionIds: unique(
@@ -79,8 +88,8 @@ export async function buildSportsCatalog(client: SportsCatalogClient, scopePaths
           .map((market) => market.slug?.toLowerCase())
           .filter((value): value is string => Boolean(value))
       )
-    });
-  }
+    } satisfies SportsScope;
+  });
 
   return {
     refreshedAt: new Date().toISOString(),
@@ -103,6 +112,46 @@ export function normalizeScopePath(value: string): string {
   return value.trim().toLowerCase().replace(/^\/+|\/+$/g, "");
 }
 
+const SCOPE_ALIASES: Record<string, string[]> = {
+  "mlc": ["major-league-cricket"],
+  "international": ["international", "international-cricket"],
+  "lpl": ["lanka-premier-league"],
+  "shpageeza": ["cricshpageeza"],
+  "atp-doubles": ["atp-doubles"],
+  "wta-doubles": ["wta-doubles"],
+  "bsn": ["bsn"],
+  "liga-mx": ["mex-2025", "mex-2026"],
+  "australia-cup": ["soccer-auc"],
+  "primera-division-argentina": ["primera-divisin-argentina", "arg-2025", "arg-2026"],
+  "uel": ["uel", "uel-2025", "uel-2026"],
+  "uefa-europa-conference-league": ["europa-conference-league"],
+  "brazil-serie-a": ["brazil-serie-a"]
+};
+
+const SEARCH_SCOPE_ALIASES: Record<string, string> = {
+  "shpageeza": "shpageeza",
+  "bsn": "bsn"
+};
+
+export function expandScopeAliases(scopePath: string): string[] {
+  const normalized = normalizeScopePath(scopePath);
+  const parts = normalized.split("/").filter((part) => part && part !== "games");
+  const leaf = parts.at(-1);
+  if (!leaf) {
+    return [];
+  }
+
+  const aliases = SCOPE_ALIASES[leaf] ?? [leaf];
+  return [...new Set(aliases)];
+}
+
+export function scopeSearchQuery(scopePath: string): string | undefined {
+  const normalized = normalizeScopePath(scopePath);
+  const parts = normalized.split("/").filter((part) => part && part !== "games");
+  const leaf = parts.at(-1);
+  return leaf ? SEARCH_SCOPE_ALIASES[leaf] : undefined;
+}
+
 async function resolveScopeEvents(client: SportsCatalogClient, scopePath: string): Promise<SportsEventRecord[]> {
   if (scopePath === "sports") {
     const metadata = await client.fetchSportsMetadata();
@@ -120,20 +169,37 @@ async function resolveScopeEvents(client: SportsCatalogClient, scopePath: string
     return uniqueEvents(events.flat());
   }
 
-  const parts = scopePath.split("/").filter((part) => part && part !== "games");
-  const leaf = parts.at(-1);
-  if (!leaf) {
+  const aliases = expandScopeAliases(scopePath);
+  if (aliases.length === 0) {
     return [];
   }
 
-  const [tag, tagEvents, series] = await Promise.all([
-    client.fetchTagBySlug(leaf).catch(() => null),
-    client.fetchEventsByTagSlug(leaf).catch(() => []),
-    client.fetchSeriesBySlug(leaf).catch(() => [])
-  ]);
+  const resolved = await Promise.all(
+    aliases.map(async (alias) => {
+      const [tag, series] = await Promise.all([
+        client.fetchTagBySlug(alias).catch(() => null),
+        client.fetchSeriesBySlug(alias).catch(() => [])
+      ]);
+      let tagEvents = tag?.id === undefined
+        ? await client.fetchEventsByTagSlug(alias).catch(() => [])
+        : await client.fetchEventsByTagId(String(tag.id)).catch(() => []);
+      if (tag?.id !== undefined && tagEvents.length === 0) {
+        tagEvents = await client.fetchEventsByTagSlug(alias).catch(() => []);
+      }
+      return [...tagEvents, ...series.flatMap((item) => item.events ?? [])];
+    })
+  );
 
-  const tagEventsById = tag?.id === undefined ? [] : await client.fetchEventsByTagId(String(tag.id)).catch(() => []);
-  return uniqueEvents([...tagEvents, ...tagEventsById, ...series.flatMap((item) => item.events ?? [])]);
+  const events = resolved.flat();
+  if (events.length > 0 || !client.fetchEventsBySearch) {
+    return uniqueEvents(events);
+  }
+
+  const query = scopeSearchQuery(scopePath);
+  if (!query) {
+    return uniqueEvents(events);
+  }
+  return uniqueEvents(await client.fetchEventsBySearch(query).catch(() => []));
 }
 
 function marketConditionId(market: SportsMarketRecord): string | undefined {
@@ -155,4 +221,22 @@ function uniqueEvents(events: SportsEventRecord[]): SportsEventRecord[] {
 
 function unique(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+async function mapWithConcurrency<T, R>(values: T[], concurrency: number, mapper: (value: T) => Promise<R>): Promise<R[]> {
+  const results: R[] = new Array(values.length);
+  let nextIndex = 0;
+
+  async function worker(): Promise<void> {
+    while (true) {
+      const index = nextIndex++;
+      if (index >= values.length) {
+        return;
+      }
+      results[index] = await mapper(values[index]);
+    }
+  }
+
+  await Promise.all(Array.from({ length: Math.min(concurrency, values.length) }, () => worker()));
+  return results;
 }

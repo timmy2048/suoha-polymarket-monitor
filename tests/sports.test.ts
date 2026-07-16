@@ -26,6 +26,24 @@ describe("sports catalog", () => {
     expect(catalog.conditionIds.has("0xatp")).toBe(true);
   });
 
+  it("resolves user-friendly aliases to the actual Polymarket series slug", async () => {
+    const event = eventRecord("mlc-game", "0xmlc");
+    const client = fakeClient({ series: { "major-league-cricket": [{ slug: "major-league-cricket", events: [event] }] } });
+
+    const catalog = await buildSportsCatalog(client, ["mlc"]);
+
+    expect(catalog.conditionIds.has("0xmlc")).toBe(true);
+  });
+
+  it("uses search only for scopes without a tag or series", async () => {
+    const event = eventRecord("bkbsn-game", "0xbsn");
+    const client = fakeClient({ searchEvents: { bsn: [event] } });
+
+    const catalog = await buildSportsCatalog(client, ["bsn"]);
+
+    expect(catalog.conditionIds.has("0xbsn")).toBe(true);
+  });
+
   it("expands the sports root through metadata tag IDs", async () => {
     const event = eventRecord("nba-event", "0xnba");
     const client = fakeClient({ metadata: [{ sport: "basketball", tags: "101, 102" }], tagIdEvents: { "101": [event] } });
@@ -67,12 +85,14 @@ function fakeClient(input: {
   tagEvents?: Record<string, SportsEventRecord[]>;
   tagIdEvents?: Record<string, SportsEventRecord[]>;
   series?: Record<string, Array<{ slug?: string; events?: SportsEventRecord[] }>>;
+  searchEvents?: Record<string, SportsEventRecord[]>;
 } = {}): SportsCatalogClient {
   return {
     fetchSportsMetadata: async () => input.metadata ?? [],
     fetchTagBySlug: async (slug) => input.tags?.[slug] ?? null,
     fetchEventsByTagId: async (id) => input.tagIdEvents?.[id] ?? [],
     fetchEventsByTagSlug: async (slug) => input.tagEvents?.[slug] ?? [],
-    fetchSeriesBySlug: async (slug) => input.series?.[slug] ?? []
+    fetchSeriesBySlug: async (slug) => input.series?.[slug] ?? [],
+    fetchEventsBySearch: async (query) => input.searchEvents?.[query] ?? []
   };
 }

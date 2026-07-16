@@ -66,6 +66,19 @@ describe("holder monitor rules", () => {
     );
   });
 
+  it("uses Polymarket sportsMarketType for non-football game markets", () => {
+    expect(classifyTargetMarket({ sportsMarketType: "baseball_team_first_five_spread" })).toBe("spread");
+    expect(classifyTargetMarket({ sportsMarketType: "ufc_method_of_victory" })).toBe("prop");
+    expect(isTargetHolderMarket({ type: "total", sportsMarketType: "nrfi", sport: "mlb" })).toBe(true);
+    expect(isTargetHolderMarket({ type: "prop", sportsMarketType: "baseball_player_home_runs", sport: "mlb" })).toBe(false);
+  });
+
+  it("keeps the World Cup line restrictions when metadata is present", () => {
+    expect(isTargetHolderMarket({ type: "spread", sportsMarketType: "spreads", sport: "soccer", line: 2.5 })).toBe(true);
+    expect(isTargetHolderMarket({ type: "spread", sportsMarketType: "spreads", sport: "soccer", line: 3.5 })).toBe(false);
+    expect(isTargetHolderMarket({ type: "total", sportsMarketType: "totals", sport: "soccer", line: 8.5 })).toBe(false);
+  });
+
   it("keeps only moneyline, 1.5/2.5 spreads, and full-game totals from 1.5 through 7.5", () => {
     expect(isTargetHolderMarket({ type: "moneyline", slug: "fifwc-nor-fra-2026-06-26-nor" })).toBe(true);
     expect(isTargetHolderMarket({ type: "moneyline", slug: "fifwc-nor-fra-2026-06-26-draw" })).toBe(true);

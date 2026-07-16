@@ -18,7 +18,7 @@ async function main(): Promise<void> {
   const config = readConfig();
   const client = new PolymarketClient();
   const notifier = createNotifier(config.dingTalkWebhookUrl, config.dingTalkSecret, sendToDingTalk);
-  const schedule = await refreshHolderSchedule(client, config.holderEventScopePaths);
+  const schedule = await refreshHolderSchedule(client, config.holderEventScopePaths, config.holderMarketTypes, config.holderScheduleLookaheadDays);
   const matches = schedule.filter((match) => localDateKey(new Date(match.gameStartTime)) === targetLocalDate);
   const qualifying: QualifyingAlert[] = [];
   const skipped: Record<string, unknown>[] = [];
