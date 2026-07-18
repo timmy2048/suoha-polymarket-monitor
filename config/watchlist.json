@@ -33,5 +33,21 @@
     "k-league",
     "primera-division-argentina"
   ],
-  "wallets": []
+  "wallets": [
+    {
+      "address": "0x4cb5a6cf70340f068148a740f9ec96cbea75ef29",
+      "label": "网球1M+",
+      "enabled": true
+    },
+    {
+      "address": "0xf5fabdcdc6eb6d9765a228824f16cca9c91f62df",
+      "label": "网球400K+",
+      "enabled": true
+    },
+    {
+      "address": "0x9cb990f1862568a63d8601efeebe0304225c32f2",
+      "label": "体育2M+",
+      "enabled": true
+    }
+  ]
 }
