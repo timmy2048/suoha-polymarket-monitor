@@ -189,7 +189,8 @@ export function formatDingTalkMarkdown(alert: Alert, keyword = LARGE_TRADE_KEYWO
       `- Tx: ${trade.transactionHash}`,
       `- \u65f6\u95f4: ${formatUtcAndBeijing(new Date(trade.timestamp * 1000))}`,
       ...cumulativeLines,
-      `- [\u6253\u5f00\u5e02\u573a](${alert.marketUrl})`
+      `- [\u6253\u5f00\u5e02\u573a](${alert.marketUrl})`,
+      `- [\u6253\u5f00\u5730\u5740](https://polymarket.com/profile/${trade.proxyWallet})`
     ].join("\n")
   };
 }

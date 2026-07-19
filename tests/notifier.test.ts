@@ -67,6 +67,7 @@ describe("DingTalk notifier", () => {
     expect(message.text).toContain("0xabc");
     expect(message.text).toContain("0xhash");
     expect(message.text).toContain("[打开市场]");
+    expect(message.text).toContain("[打开地址](https://polymarket.com/profile/0xabc)");
   });
 
   it("makes address BUY and initial stage explicit", () => {
